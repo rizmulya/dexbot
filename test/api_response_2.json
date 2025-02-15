@@ -1,0 +1,76 @@
+{
+    "schemaVersion": "1.0.0",
+    "pairs": [
+        {
+            "chainId": "solana",
+            "dexId": "raydium",
+            "url": "https://dexscreener.com/solana/63qzbwpnjhxdx4ls7tfc37to4tdtahlghkyfvoyh4uad",
+            "pairAddress": "63QZbWpnJhxDx4Ls7TFc37To4TDtahLGHKYFvoYh4UAD",
+            "baseToken": {
+                "address": "Dw6docEkKZn9kDVAzkppcE1jWe9tK9LAtCsmSqdEYvbU",
+                "name": "Barron Meme",
+                "symbol": "BARRON"
+            },
+            "quoteToken": {
+                "address": "So11111111111111111111111111111111111111112",
+                "name": "Wrapped SOL",
+                "symbol": "SOL"
+            },
+            "priceNative": "0.0000007263",
+            "priceUsd": "0.0001415",
+            "txns": {
+                "m5": {
+                    "buys": 2,
+                    "sells": 1
+                },
+                "h1": {
+                    "buys": 19,
+                    "sells": 5
+                },
+                "h6": {
+                    "buys": 6651,
+                    "sells": 2558
+                },
+                "h24": {
+                    "buys": 6651,
+                    "sells": 2558
+                }
+            },
+            "volume": {
+                "h24": 4018764.2,
+                "h6": 4018764.2,
+                "h1": 9964.68,
+                "m5": 1.89
+            },
+            "priceChange": {
+                "m5": 0.13,
+                "h1": -87.34,
+                "h6": 1891,
+                "h24": 1891
+            },
+            "liquidity": {
+                "usd": 10646.5,
+                "base": 37658275,
+                "quote": 27.2908
+            },
+            "fdv": 1415209,
+            "marketCap": 1415209,
+            "pairCreatedAt": 1739595740000,
+            "info": {
+                "imageUrl": "https://dd.dexscreener.com/ds-data/tokens/solana/Dw6docEkKZn9kDVAzkppcE1jWe9tK9LAtCsmSqdEYvbU.png?key=98295a",
+                "header": "https://dd.dexscreener.com/ds-data/tokens/solana/Dw6docEkKZn9kDVAzkppcE1jWe9tK9LAtCsmSqdEYvbU/header.png?key=98295a",
+                "openGraph": "https://cdn.dexscreener.com/token-images/og/solana/Dw6docEkKZn9kDVAzkppcE1jWe9tK9LAtCsmSqdEYvbU?timestamp=1739614200000",
+                "websites": [],
+                "socials": [
+                    {
+                        "type": "twitter",
+                        "url": "https://x.com/Barronlovesolan"
+                    }
+                ]
+            },
+            "boosts": {
+                "active": 10
+            }
+        }
+    ]
+}
