@@ -1,60 +1,14 @@
 import requests
-import sqlite3
-import time
-import pandas as pd
 from datetime import datetime
-from zoneinfo import ZoneInfo
-from test.utils import fnum, send_telegram_message
+from utils.db import session
+from dexscreener.models import Token, TokenDetail, Alert
+from sqlalchemy.exc import IntegrityError
+import pandas as pd
+from utils.telegram import send_telegram_message
+from utils.format import fnum
 
-# Dexscreener API Endpoint
 API_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
 DEX_API_URL = "https://api.dexscreener.com/latest/dex/tokens/"
-
-# Database Setup
-db_conn = sqlite3.connect("dexscreener_data.db", check_same_thread=False)
-cursor = db_conn.cursor()
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS tokens (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    token_address TEXT UNIQUE,
-    chain_id TEXT,
-    url TEXT,
-    icon TEXT,
-    description TEXT,
-    created_at TEXT
-)''')
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS token_details ( 
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chain_id TEXT,
-    dex_id TEXT,
-    url TEXT,
-    token_address TEXT,
-    pair_address TEXT,
-    name TEXT,
-    symbol TEXT,
-    priceUsd REAL,
-    liquidityUsd REAL,
-    volume24h REAL,
-    priceChange24h REAL,
-    market_cap REAL,
-    created_at TEXT
-)''')
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS alerts (
-    token_address TEXT PRIMARY KEY,
-    last_priceUsd REAL,
-    last_priceChange24h REAL,
-    last_volume24h REAL,
-    last_alert_type TEXT,
-    last_alert_time TEXT,
-    dex_id TEXT
-)''')
-
-cursor.execute('CREATE INDEX IF NOT EXISTS idx_token_address ON token_details (token_address)') 
-cursor.execute('CREATE INDEX IF NOT EXISTS idx_created_at ON token_details (created_at)')
-cursor.execute('CREATE INDEX IF NOT EXISTS idx_token_address ON alerts (token_address)') 
-db_conn.commit()
 
 def fetch_token_data():
     """Mengambil daftar token terbaru dari API Dexscreener."""
@@ -80,14 +34,13 @@ def fetch_token_details(token_address):
 def parse_tokens(token):
     """Parsing data token untuk kompatibilitas database"""
     try:
-        timenow = datetime.now(ZoneInfo("Asia/Jakarta")).isoformat()
         return {
             "token_address": token.get("tokenAddress", ""),
             "chain_id": token.get("chainId", ""),
             "url": token.get("url", ""),
             "icon": token.get("icon", ""),
             "description": token.get("description", "-"),
-            "created_at": timenow,
+            "created_at": datetime.now(),
         }
     except Exception as e:
         print(f"Parse Token Error: {e}")
@@ -96,7 +49,6 @@ def parse_tokens(token):
 def parse_token_details(token):
     """Parsing data token untuk kompatibilitas database"""
     try:
-        timenow = datetime.now(ZoneInfo("Asia/Jakarta")).isoformat()
         return {
             "chain_id": token.get("chainId", ""),
             "dex_id": token.get("dexId", ""),
@@ -105,14 +57,12 @@ def parse_token_details(token):
             "token_address": token.get("baseToken", {}).get("address", "-"),
             "name": token.get("baseToken", {}).get("name", "-"),
             "symbol": token.get("baseToken", {}).get("symbol", "-"),
-
             "priceUsd": float(token.get("priceUsd", 0)),
             "liquidityUsd": float(token.get("liquidity", {}).get("usd", 0)),
             "volume24h": float(token.get("volume", {}).get("h24", 0)),
             "priceChange24h": float(token.get("priceChange", {}).get("h24", 0)),
             "market_cap": float(token.get("marketCap", 0)),
-
-            "created_at": timenow,
+            "created_at": datetime.now(),
         }
     except Exception as e:
         print(f"Parse Token Error: {e}")
@@ -127,71 +77,67 @@ def save_tokens(data):
             continue
         
         try:
-            cursor.execute('''INSERT INTO tokens (token_address, chain_id, url, icon, description, created_at)
-                              VALUES (?, ?, ?, ?, ?, ?)''',
-                           (parsed_token["token_address"], parsed_token["chain_id"], parsed_token["url"],
-                            parsed_token["icon"], parsed_token["description"], parsed_token["created_at"]))
-            db_conn.commit()
+            token_record = Token(**parsed_token)
+            session.add(token_record)
+            session.commit()
             new_tokens.append(parsed_token)
-        except sqlite3.IntegrityError:
-            continue  # Jika token sudah ada, lewati
+        except IntegrityError:
+            session.rollback()
+            continue
         except Exception as e:
+            session.rollback()
             print(f"Save Token Error: {e}")
-
-    # if new_tokens:
-    #     message = "*🚀 Token Baru Terdeteksi:*\n"
-    #     for token in new_tokens:
-    #         message += f"\n- [{token['token_address']}]({token['url']})\n"
-    #     send_telegram_message(message)
+        finally:
+            session.close()
 
 def save_token_details(data):
     """Menyimpan data harga dan volume token ke database."""
     try:
-        cursor.execute('''INSERT INTO token_details (chain_id, dex_id, url, token_address, pair_address, name, symbol, priceUsd, liquidityUsd, volume24h, priceChange24h, market_cap, created_at) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (data["chain_id"], data["dex_id"], data["url"], data["token_address"], data["pair_address"],
-                        data["name"], data["symbol"], data["priceUsd"], data["liquidityUsd"],
-                        data["volume24h"], data["priceChange24h"], data["market_cap"], data["created_at"]))
-        db_conn.commit()
+        token_detail_record = TokenDetail(**data)
+        session.add(token_detail_record)
+        session.commit()
     except Exception as e:
+        session.rollback()
         print(f"Save Token Details Error: {e}")
+    finally:
+        session.close()
 
-"""
-ALERTS
-"""
 def should_send_alert(token, alert_type):
     """Cek apakah perlu mengirim notifikasi berdasarkan perubahan signifikan dan cooldown."""
-    cursor.execute("SELECT last_priceUsd, last_priceChange24h, last_volume24h, last_alert_type, last_alert_time FROM alerts WHERE token_address = ?", 
-                   (token["token_address"],))
-    row = cursor.fetchone()
+    alert_record = session.query(Alert).filter_by(token_address=token["token_address"]).first()
 
-    if not row:
+    if not alert_record:
         # Jika belum ada di database, kirim notifikasi pertama kali
-        cursor.execute('''INSERT INTO alerts (token_address, last_priceUsd, last_priceChange24h, last_volume24h, last_alert_type, last_alert_time, dex_id) 
-                          VALUES (?, ?, ?, ?, ?, ?, ?)''', 
-                       (token["token_address"], token["priceUsd"], token["priceChange24h"], token["volume24h"], alert_type, datetime.now(ZoneInfo("Asia/Jakarta")).isoformat(), token["dex_id"]))
-        db_conn.commit()
+        alert_record = Alert(
+            token_address=token["token_address"],
+            last_priceUsd=token["priceUsd"],
+            last_priceChange24h=token["priceChange24h"],
+            last_volume24h=token["volume24h"],
+            last_alert_type=alert_type,
+            last_alert_time=datetime.now(),
+            dex_id=token["dex_id"]
+        )
+        session.add(alert_record)
+        session.commit()
+        session.close()
         return True
 
-    last_price, last_change, last_volume, last_alert, last_alert_time = row
-
     # Hitung waktu sejak notifikasi terakhir
-    last_alert_time = datetime.fromisoformat(last_alert_time)
-    time_since_last_alert = datetime.now(ZoneInfo("Asia/Jakarta")) - last_alert_time
+    time_since_last_alert = datetime.now() - alert_record.last_alert_time
     cooldown_period = 3600  # Cooldown 1 jam (3600 detik)
 
     if time_since_last_alert.total_seconds() < cooldown_period:
         return False  # Masih dalam cooldown, tidak kirim notifikasi
 
     # Hitung perubahan
-    price_change_diff = abs(token["priceChange24h"] - last_change)
-    volume_change_ratio = token["volume24h"] / max(last_volume, 1)
+    price_change_diff = abs(token["priceChange24h"] - alert_record.last_priceChange24h)
+    volume_change_ratio = token["volume24h"] / max(alert_record.last_volume24h, 1)
 
     # Jika terjadi perubahan signifikan, update database dan kirim notifikasi
-    if alert_type == "pump" and price_change_diff > 20:  # Harga berubah lebih dari 20%
+    if alert_type == "pump" and price_change_diff > 50:  # Harga berubah lebih dari 50%
         update_alert(token, alert_type)
         return True
-    elif alert_type == "rug_pull" and price_change_diff > 20:  # Harga berubah lebih dari 20%
+    elif alert_type == "rug_pull" and price_change_diff > 50:  # Harga berubah lebih dari 50%
         update_alert(token, alert_type)
         return True
     elif alert_type == "volume_spike" and volume_change_ratio > 2:  # Volume naik lebih dari 2x
@@ -202,21 +148,24 @@ def should_send_alert(token, alert_type):
 
 def update_alert(token, alert_type):
     """Update status alert di database"""
-    cursor.execute('''UPDATE alerts SET last_priceUsd = ?, last_priceChange24h = ?, last_volume24h = ?, last_alert_type = ?, last_alert_time = ?, dex_id = ?
-                      WHERE token_address = ?''',
-                   (token["priceUsd"], token["priceChange24h"], token["volume24h"], alert_type, datetime.now(ZoneInfo("Asia/Jakarta")).isoformat(), token["dex_id"], token["token_address"]))
-    db_conn.commit()
-"""
-END ALERTS
-"""
+    alert_record = session.query(Alert).filter_by(token_address=token["token_address"]).first()
+    if alert_record:
+        alert_record.last_priceUsd = token["priceUsd"]
+        alert_record.last_priceChange24h = token["priceChange24h"]
+        alert_record.last_volume24h = token["volume24h"]
+        alert_record.last_alert_type = alert_type
+        alert_record.last_alert_time = datetime.now()
+        alert_record.dex_id = token["dex_id"]
+        session.commit()
+        session.close()
 
 def analyze_market():
     """Menganalisis tren pasar seperti Pump, Rug Pull, dan Volume Spike."""
     try:
-        df = pd.read_sql_query("SELECT * FROM token_details ORDER BY created_at DESC LIMIT 200", db_conn)
+        df = pd.read_sql_query("SELECT * FROM dex_token_details ORDER BY created_at DESC LIMIT 200", session.bind)
 
-        # Deteksi PUMP (kenaikan harga >50% dalam 24 jam, volume tinggi)
-        pump_tokens = df[(df["priceChange24h"] > 50) & (df["volume24h"] > 100000)]
+        # Deteksi PUMP (kenaikan harga >100% dalam 24 jam, volume tinggi)
+        pump_tokens = df[(df["priceChange24h"] > 100) & (df["volume24h"] > 100000)]
         
         # Deteksi RUG PULL (penurunan harga >90%, likuiditas sangat rendah)
         rug_pull_tokens = df[(df["priceChange24h"] < -90) & (df["liquidityUsd"] < 5000)]
@@ -269,34 +218,3 @@ def analyze_market():
                 send_telegram_message(message, True)
     except Exception as e:
         print(f"Analyze Market Error: {e}")
-
-def main():
-    """Loop utama untuk mengambil dan menyimpan data token setiap 60 detik."""
-    i = 1
-    while True:
-        try:
-            token_data = fetch_token_data()
-            if token_data:
-                save_tokens(token_data)
-
-            cursor.execute("SELECT token_address FROM tokens")
-            token_list = [row[0] for row in cursor.fetchall()]
-            
-            for token in token_list:
-                token_details = fetch_token_details(token)
-                if token_details and token_details.get("pairs") is not None:
-                    for pair in token_details["pairs"]:
-                        parsed_data = parse_token_details(pair)
-                        if parsed_data:
-                            save_token_details(parsed_data)
-
-            analyze_market()
-        except Exception as e:
-            print(f"Main Loop Error: {e}")
-        
-        print(i)
-        i += 1
-        time.sleep(60)
-
-if __name__ == "__main__":
-    main()

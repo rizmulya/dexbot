@@ -3,8 +3,7 @@ import time
 import pandas as pd
 from datetime import datetime
 import os
-from utils import fnum, send_telegram_message
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Index, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
@@ -222,8 +221,8 @@ def analyze_market():
     try:
         df = pd.read_sql_query("SELECT * FROM token_details ORDER BY created_at DESC LIMIT 200", engine)
 
-        # Deteksi PUMP (kenaikan harga >50% dalam 24 jam, volume tinggi)
-        pump_tokens = df[(df["priceChange24h"] > 50) & (df["volume24h"] > 100000)]
+        # Deteksi PUMP (kenaikan harga >100% dalam 24 jam, volume tinggi)
+        pump_tokens = df[(df["priceChange24h"] > 100) & (df["volume24h"] > 100000)]
         
         # Deteksi RUG PULL (penurunan harga >90%, likuiditas sangat rendah)
         rug_pull_tokens = df[(df["priceChange24h"] < -90) & (df["liquidityUsd"] < 5000)]
@@ -282,17 +281,22 @@ def main():
     i = 1
     while True:
         try:
+            print(f"{i} fetching tokens...")
             token_data = fetch_token_data()
             if token_data:
+                print(f"{i} saving tokens...")
                 save_tokens(token_data)
 
             token_list = session.query(Token.token_address).all()
             for token in token_list:
+                print(f"Fetching details for token {token[0]}...")
                 token_details = fetch_token_details(token[0])
-                if token_details and "pairs" in token_details:
+                if token_details and token_details.get("pairs") is not None:
                     for pair in token_details["pairs"]:
+                        print(f"{i} parse token details...")
                         parsed_data = parse_token_details(pair)
                         if parsed_data:
+                            print(f"{i} saving token details...")
                             save_token_details(parsed_data)
 
             analyze_market()
